@@ -1,4 +1,6 @@
-﻿namespace SimpleGit
+﻿using LibGit2Sharp;
+
+namespace SimpleGit
 {
     public class GitRemote
     {
@@ -38,6 +40,31 @@
             this.IsFork = false;
             this.Size = 0;
             this.Remotes = new List<GitRemote>();
+        }
+
+        public static GitRepository Load(string gitPath)
+        {
+            var result = new GitRepository();
+
+            using (var gitRepo = new Repository(gitPath))
+            {
+                result.GitPath = gitPath;
+                result.IsFork = false;
+                result.LastCommit = gitRepo.Head.Tip.Author.When;
+                result.LastFetch = Directory.GetParent(gitPath).LastWriteTime;
+                result.Name = Directory.GetParent(gitPath).Name;
+                result.Remotes = gitRepo.Network.Remotes.Select(x => new GitRemote()
+                {
+                    Name = x.Name,
+                    Url = x.Url
+
+                }).ToList();
+
+                result.Size = 0;
+                result.WorkingDirectory = Directory.GetParent(gitPath).FullName;
+            }
+
+            return result;
         }
     }
 }
