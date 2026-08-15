@@ -25,34 +25,41 @@ namespace SimpleGit
         /// <summary>
         /// Calls terminal with command line; and outputs to the callback. Return true if exit code was zero.
         /// </summary>
-        static bool Call(string executable, string arguments)
+        static bool Call(string workingDirectory, string executable, string arguments)
         {
             try
             {
                 var process = new Process();
                 process.StartInfo.FileName = executable;                   // Assume Environment Variables ($Path) contains the process
+                process.StartInfo.WorkingDirectory = workingDirectory;
                 process.StartInfo.Arguments = arguments;
-                process.StartInfo.RedirectStandardInput = true;
-                process.StartInfo.RedirectStandardOutput = true;
                 process.StartInfo.CreateNoWindow = true;
-                process.StartInfo.UseShellExecute = true;                   // Assumes shell enviroment (probably the terminal windows is used to, not ours)
+                process.StartInfo.RedirectStandardError = true;
+                process.StartInfo.RedirectStandardOutput = true;
+                process.StartInfo.UseShellExecute = false;                 // Assumes shell enviroment (probably the terminal windows is used to, not ours)
+
+                process.EnableRaisingEvents = true;
 
                 // Info
                 process.OutputDataReceived += (message, e) =>
                 {
-                    Output(e.Data, true, ConsoleColor.Yellow);
+                    Output("\t" + e.Data, true, ConsoleColor.Yellow);
                 };
 
                 // Error
                 process.ErrorDataReceived += (message, e) =>
                 {
-                    Output(e.Data, true, ConsoleColor.Red);
+                    Output("\t" + e.Data, true, ConsoleColor.Yellow);
                 };
 
+                Output("Calling Git:  " + GIT + " " + arguments);
+
                 process.Start();
+                process.BeginOutputReadLine();
+                process.BeginErrorReadLine();
                 process.WaitForExit();
 
-                Output("Git process exited with code " + process.ExitCode);
+                //Output("Git process exited with code " + process.ExitCode);
 
                 return process.ExitCode == 0;
             }
@@ -123,11 +130,33 @@ namespace SimpleGit
         {
             Output("Welcome to SimpleGit! This application operates on your base git folder to manage multiple git repositories.");
             Output("");
+
             Output("Usage:  SimpleGit.exe [options] [directory] (defaults to current directory)");
             Output("");
+
+            Output("Git Usage:  For all git.exe commands, you must specify -user and -pass (user name and password).");
+            Output("            SimpleGit uses the following configuration");
+            Output("");
+            Output("            config --global user.name     [your user name]");
+            Output("            config --global user.password [your user password]");
+            Output("");
+
             Output("Options:");
+            Output("\t -help \t\t\t Outputs this help menu");
             Output("\t -list \t\t\t Outputs list of all repositories in this folder's top level (recurses only top level directories)");
+            Output("");
+
+            Output("Git Options:");
+            Output("\t -user \t\t\t Sets user name for git.exe usage");
+            Output("\t -pass \t\t\t Sets password for git.exe usage");
             Output("\t -fetch [options] \t Fetches from all remotes for the repositories listed by the -list command");
+            Output("");
+
+            Output("Fetch Options: \t SimpleGit only allows certain git.exe fetch options. These are limited to protect your repositories.");
+            Output("\t\t By default SimpleGit will perform { git.exe fetch -v } to fetch all remotes.");
+            Output("");
+
+            Output("\t -r [repository name] \t Fetches specific repository from this directory { git.exe [specific repostiory] fetch -v }");
             Output("");
         }
 
@@ -154,7 +183,7 @@ namespace SimpleGit
 
         static bool IsCommand(string argument)
         {
-            return argument == "-list" || argument == "-fetch";
+            return argument == "-help" || argument == "-list" || argument == "-fetch" || argument == "-user" || argument == "-pass";
         }
 
         static void List(string directory)
@@ -176,6 +205,25 @@ namespace SimpleGit
             Output("");
         }
 
+        static void Fetch(string workingDirectory)
+        {
+            var repositories = GetRepositories(workingDirectory);
+
+            foreach (var repository in repositories)
+            {
+                try
+                {
+                    // -> Git Repo Directory, git.exe, fetch
+                    Call(Path.Combine(workingDirectory, repository.Name), GIT, "fetch -v");
+                }
+                catch (Exception ex)
+                {
+                    Output("Error calling git.exe:  " + ex.Message, true, ConsoleColor.Red);
+                }
+            }
+
+        }
+
         static void Main(string[] args)
         {
             var directory = Directory.GetCurrentDirectory();
@@ -190,8 +238,14 @@ namespace SimpleGit
             if (!IsCommand(args[args.Length - 1]))
                 directory = args[args.Length - 1];
 
+            // Help
+            if (GetArgument("-help", args) != null)
+            {
+                PrintHelp();
+            }
+
             // List (first argument)
-            if (GetArgument("-list", args) != null)
+            else if (GetArgument("-list", args) != null)
             {
                 List(directory);
             }
@@ -199,7 +253,7 @@ namespace SimpleGit
             // Fetch (first argument)
             else if (GetArgument("-fetch", args) != null)
             {
-
+                Fetch(directory);
             }
 
             else
