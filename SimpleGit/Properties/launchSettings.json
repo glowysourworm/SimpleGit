@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "SimpleGit": {
+      "commandName": "Project",
+      "commandLineArgs": "-list c:\\Backup\\_Source\\Git"
+    }
+  }
+}
