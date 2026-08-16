@@ -1,7 +1,5 @@
 ﻿using System.Diagnostics;
 
-using LibGit2Sharp;
-
 using SimpleWpf.Extensions;
 
 namespace SimpleGit
@@ -96,30 +94,9 @@ namespace SimpleGit
                 // Check for .git folder
                 if (Directory.Exists(gitPath))
                 {
-                    using (var gitRepo = new Repository(gitPath))
-                    {
-                        var repository = new GitRepository()
-                        {
-                            Name = Directory.GetParent(gitPath).Name,           // Implicit git repo name (not usually stored in the .git repo information)                            
-                            GitPath = gitPath,
-                            IsFork = false,
-                            LastCommit = gitRepo.Head.Tip.Author.When,
-                            LastFetch = Directory.GetLastWriteTime(gitPath),    // Still looking for way to get last fetch from git
-                            Size = 0,
-                            WorkingDirectory = gitRepo.Info.WorkingDirectory,
-                            Remotes = gitRepo.Network.Remotes.Select(gitRemote =>
-                            {
-                                return new GitRemote()
-                                {
-                                    Name = gitRemote.Name,
-                                    Url = gitRemote.Url
-                                };
+                    var repository = GitRepository.Load(gitPath);
 
-                            }).ToList()
-                        };
-
-                        result.Add(repository);
-                    }
+                    result.Add(repository);
                 }
             }
 
@@ -195,7 +172,7 @@ namespace SimpleGit
 
             foreach (var repository in repositories)
             {
-                var output = string.Format("{0}\t{1}\t{2}", repository.Name.ForceLengthLeft(30, false), repository.GitPath.ForceLengthRight(50, true), repository.LastFetch.ToString("yyyy-mm-dd hh:mm:ss tt"));
+                var output = string.Format("{0}\t{1}\t{2}", repository.Name.ForceLengthLeft(30, false), repository.GitPath.ForceLengthRight(50, true), repository.LastCommitLocal.ToString("yyyy-mm-dd hh:mm:ss tt"));
 
                 Output(output);
             }

@@ -2,7 +2,7 @@
   "profiles": {
     "SimpleGit": {
       "commandName": "Project",
-      "commandLineArgs": "-fetch c:\\Backup\\_Source\\Git"
+      "commandLineArgs": "-help"
     }
   }
 }
