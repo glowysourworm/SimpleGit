@@ -2,7 +2,7 @@
 {
     public class GitRepositoryLocal : GitRepository
     {
-        public GitRepositoryLocal(long id, string name) : base(id, name)
+        public GitRepositoryLocal(string name) : base(name)
         {
             this.GitPath = string.Empty;
             this.WorkingDirectory = string.Empty;

@@ -7,11 +7,6 @@
     public abstract class GitRepository
     {
         /// <summary>
-        /// Id of remote repository
-        /// </summary>
-        public long Id { get; set; }
-
-        /// <summary>
         /// Gets name of the repository
         /// </summary>
         public string Name { get; set; }
@@ -34,10 +29,9 @@
             return this.Branches.First(x => x.IsHead);
         }
 
-        public GitRepository(long id, string name)
+        public GitRepository(string name)
         {
-            this.Id = id;
-            this.Name = string.Empty;
+            this.Name = name;
             this.Branches = new List<GitBranch>();
             this.Size = 0;
         }

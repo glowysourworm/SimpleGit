@@ -20,103 +20,299 @@ namespace SimpleGit.Component
         {
         }
 
-        public Task<GitRepositoryResponse> Fetch(GitRepositoryRequest request, GitHandlers.GitLogHandler logHandler)
+        public Task<GitRepositoryResponse> Process(GitRepositoryRequest request)
         {
+            if (!ValidateRequest(request))
+                throw new ArgumentException("Invalid IGitProxy request");
+
             return Task.Run(async () =>
             {
-                logHandler("Fetch started: " + request.Url);
+                GitResponseData? single = null;
+                IEnumerable<GitResponseData> multiple = null;
 
-                var success = Call(request.WorkingDirectory, GIT, GIT_FETCH, (git, message, isError) =>
+                switch (request.Type)
                 {
-                    return logHandler(message);
-                });
+                    case GitRepositoryRequest.RequestType.LocalReadSingle:
+                    case GitRepositoryRequest.RequestType.GithubReadSingle:
+                    case GitRepositoryRequest.RequestType.Fetch:
+                    case GitRepositoryRequest.RequestType.Clone:
+                        single = await OpenSingle(request);
+                        break;
+                    case GitRepositoryRequest.RequestType.LocalReadAll:
+                        multiple = await OpenDirectory(request);
+                        break;
+                    case GitRepositoryRequest.RequestType.GithubReadAll:
+                        multiple = await OpenGithub(request);
+                        break;
+                    default:
+                        throw new Exception("Unhandled IGitProxy request type");
+                }
 
-                if (success)
-                    logHandler("Fetch completed successfully!");
-                else
-                    logHandler("Fetch completed with errors");
-
-                return await Open(request);
+                return new GitRepositoryResponse()
+                {
+                    IsMultipleResponse = multiple != null,
+                    MultipleResponseData = multiple?.ToList() ?? null,
+                    SingleResponseData = single
+                };
             });
         }
 
-        public Task<GitRepositoryResponse> Clone(GitRepositoryRequest request, GitHandlers.GitLogHandler logHandler)
+        private Task<IEnumerable<GitResponseData>> OpenDirectory(GitRepositoryRequest request)
         {
             return Task.Run(async () =>
             {
-                logHandler("Cloning from: " + request.Url);
-
-                var success = Call(request.BaseDirectory, GIT, string.Format(GIT_CLONE_FORMAT, request.Url), (git, message, isError) =>
-                {
-                    return logHandler(message);
-                });
-
-                if (success)
-                    logHandler("Clone completed successfully!");
-                else
-                    logHandler("Clone completed with errors");
-
-                return await Open(request);
-            });
-        }
-
-        public Task<IEnumerable<GitRepositoryResponse>> OpenMany(GitRepositoryRequest request)
-        {
-            return Task.Run(async () =>
-            {
-                var result = new List<GitRepositoryResponse>();
+                var result = new List<GitResponseData>();
 
                 foreach (var directory in Directory.GetDirectories(request.BaseDirectory))
                 {
-                    var gitPath = Path.Combine(directory, ".git");
+                    var gitPath = CreateGitPath(request.BaseDirectory, directory);
 
                     // Check for .git folder
                     if (Directory.Exists(gitPath))
                     {
-                        var response = await Open(request);
+                        // Individual Request(s)
+                        GitRepositoryRequest repoRequest = null;
+
+                        // Check local folder
+                        using (var gitRepo = new LibGit2Sharp.Repository(gitPath))
+                        {
+                            var repositoryName = Directory.GetParent(gitPath).Name;
+
+                            repoRequest = new GitRepositoryRequest()
+                            {
+                                BaseDirectory = request.BaseDirectory,
+                                Password = request.Password,
+                                Type = GitRepositoryRequest.RequestType.LocalReadSingle,
+                                Url = request.Url,
+                                User = request.User,
+                                WorkingDirectory = directory,
+                                RepositoryName = repositoryName
+                            };
+                        }
+
+                        var response = await OpenSingle(repoRequest);
 
                         result.Add(response);
                     }
                 }
 
-                return (IEnumerable<GitRepositoryResponse>)result;
+                return (IEnumerable<GitResponseData>)result;
             });
         }
 
-        public Task<GitRepositoryResponse> Open(GitRepositoryRequest request)
+        private Task<IEnumerable<GitResponseData>> OpenGithub(GitRepositoryRequest request)
         {
             return Task.Run(async () =>
             {
-                // Get remote repository first
-                var result = new GitRepositoryResponse();
-                var remote = await GetRepositoryRemote(request.User, request.Password, request.RepositoryId);
-                var gitPath = CreateGitPath(request);
+                var result = new List<GitResponseData>();
 
-                if (request.RepositoryId != remote.Id)
-                    throw new ArgumentException("Repository ID's for request do not match between local and remote");
-
-                using (var gitRepo = new LibGit2Sharp.Repository(gitPath))
+                using (var proxy = new GithubProxy())
                 {
-                    var local = new GitRepositoryLocal(request.RepositoryId, request.RepositoryName);
+                    var repositories = await proxy.GetAllGithubRepositories(request.User, request.Password);
 
-                    local.GitPath = gitPath;
-                    local.Remotes = gitRepo.Network.Remotes.Select(x => new GitRemote(remote.Id, x.Name, x.Url)).ToList();
-                    local.Size = 0;
-                    local.WorkingDirectory = gitRepo.Info.WorkingDirectory;
-                    local.Branches = gitRepo.Branches.Select(x => new GitBranch()
+                    foreach (var repository in repositories)
                     {
-                        IsHead = x.IsCurrentRepositoryHead,
-                        LastCommit = new GitCommit()
+                        var response = await OpenSingle(new GitRepositoryRequest()
                         {
-                            Message = x.Tip.Message,
-                            Sha = x.Tip.Sha,
-                            Timestamp = x.Tip.Author.When,
-                            Author = x.Tip.Author.Name
-                        },
-                        Name = x.CanonicalName,
-                        RemoteName = x.RemoteName
-                    }).ToList();
+                            BaseDirectory = request.BaseDirectory,
+                            Password = request.Password,
+                            RepositoryName = repository.Name,
+                            Type = GitRepositoryRequest.RequestType.GithubReadSingle,
+                            Url = request.Url,
+                            User = request.User,
+                            WorkingDirectory = repository.Name                  // This may need to be changed
+                        });
 
+                        result.Add(response);
+                    }
+                }
+
+                return (IEnumerable<GitResponseData>)result;
+            });
+        }
+
+        private Task<GitResponseData> OpenSingle(GitRepositoryRequest request)
+        {
+            if (!ValidateRequest(request))
+                throw new ArgumentException("Invalid IGitProxy request");
+
+            return Task.Run(async () =>
+            {
+                // Get remote repository first
+                var result = new GitResponseData();
+                var success = false;
+
+                bool localRead = false;
+                bool remoteRead = false;
+                bool remoteIsGithub = false;
+
+                string? gitPath = null;
+                GitRepositoryLocal? local = null;
+                GitRepositoryRemote? remote = null;
+                GitCommitHistory? localHistory = null;
+                GitCommitHistory? remoteHistory = null;
+
+                switch (request.Type)
+                {
+                    case GitRepositoryRequest.RequestType.LocalReadSingle:
+                    {
+                        localRead = true;
+                    }
+                    break;
+                    case GitRepositoryRequest.RequestType.GithubReadSingle:
+                    {
+                        remoteRead = true;
+                        remoteIsGithub = true;
+                    }
+                    break;
+                    case GitRepositoryRequest.RequestType.Fetch:
+                    case GitRepositoryRequest.RequestType.Clone:
+                    {
+                        localRead = true;
+                        remoteRead = true;
+                        remoteIsGithub = request.Url.Contains("github.com");        // Kludgey (TODO)
+                    }
+                    break;
+                    default:
+                        throw new Exception("Unhandled IGitProxy request type");
+                }
+
+                // Clone:  Assume local read must be done after clone operation
+                //
+                if (request.Type == GitRepositoryRequest.RequestType.Clone)
+                {
+                    success = Call(request.BaseDirectory, GIT, string.Format(GIT_CLONE_FORMAT, request.Url), (git, message, isError) =>
+                    {
+                        return request.LogHandler(message);
+                    });
+
+                    if (success)
+                        gitPath = CreateGitPath(request.BaseDirectory, request.WorkingDirectory);
+                    else
+                        throw new Exception("Error running git.exe clone " + request.Url);
+                }
+
+                // Fetch
+                //
+                if (request.Type == GitRepositoryRequest.RequestType.Fetch)
+                {
+                    success = Call(request.WorkingDirectory, GIT, GIT_FETCH, (git, message, isError) =>
+                    {
+                        return request.LogHandler(message);
+                    });
+
+                    if (success)
+                        gitPath = CreateGitPath(request.BaseDirectory, request.WorkingDirectory);
+                    else
+                        throw new Exception("Error running git.exe clone " + request.Url);
+                }
+
+                // Open:  Local | Remote (github?)
+                //
+                if (localRead && gitPath == null)
+                    gitPath = CreateGitPath(request.BaseDirectory, request.WorkingDirectory);
+
+                if (localRead)
+                    local = OpenLocalImpl(gitPath);
+
+                if (remoteRead)
+                {
+                    if (remoteIsGithub)
+                        remote = await OpenRemoteImpl(request.User, request.Password, request.RepositoryName);
+
+                    else
+                        throw new Exception("Remote Only mode is not supported for other services. Please use Github for remote-only.");
+                }
+
+                // History
+                if (local != null &&
+                    remote != null &&
+                    remoteIsGithub)
+                {
+                    await OpenHistoryImpl(request.User, request.Password, local, remote, (localHis, remoteHis) =>
+                    {
+                        // Callback Setter
+                        localHistory = localHis;
+                        remoteHistory = remoteHis;
+                    });
+                }
+
+                return OpenImpl(local, remote, localHistory, remoteHistory);
+            });
+        }
+
+        #region (private) Impl Methods
+
+        private bool ValidateRequest(GitRepositoryRequest request)
+        {
+            switch (request.Type)
+            {
+                case GitRepositoryRequest.RequestType.LocalReadSingle:
+                    return !string.IsNullOrWhiteSpace(request.BaseDirectory) &&
+                           !string.IsNullOrWhiteSpace(request.WorkingDirectory) &&
+                           !string.IsNullOrWhiteSpace(request.RepositoryName) &&
+                            Directory.Exists(request.BaseDirectory) &&
+                            Directory.Exists(request.WorkingDirectory);
+
+                case GitRepositoryRequest.RequestType.LocalReadAll:
+                    return !string.IsNullOrWhiteSpace(request.BaseDirectory) &&
+                            Directory.Exists(request.BaseDirectory);
+
+                case GitRepositoryRequest.RequestType.GithubReadSingle:
+                    return !string.IsNullOrWhiteSpace(request.BaseDirectory) &&
+                           !string.IsNullOrWhiteSpace(request.WorkingDirectory) &&
+                           !string.IsNullOrWhiteSpace(request.RepositoryName) &&
+                            Directory.Exists(request.BaseDirectory) &&
+                            Directory.Exists(request.WorkingDirectory) &&
+                           !string.IsNullOrWhiteSpace(request.User) &&
+                           !string.IsNullOrWhiteSpace(request.Password) &&
+                           !string.IsNullOrWhiteSpace(request.Url);
+
+                case GitRepositoryRequest.RequestType.GithubReadAll:
+                    return !string.IsNullOrWhiteSpace(request.BaseDirectory) &&
+                            Directory.Exists(request.BaseDirectory) &&
+                           !string.IsNullOrWhiteSpace(request.User) &&
+                           !string.IsNullOrWhiteSpace(request.Password);
+
+                case GitRepositoryRequest.RequestType.Fetch:
+                    return !string.IsNullOrWhiteSpace(request.BaseDirectory) &&
+                           !string.IsNullOrWhiteSpace(request.WorkingDirectory) &&
+                           !string.IsNullOrWhiteSpace(request.RepositoryName) &&
+                            Directory.Exists(request.BaseDirectory) &&
+                            Directory.Exists(request.WorkingDirectory) &&
+                           !string.IsNullOrWhiteSpace(request.User) &&
+                           !string.IsNullOrWhiteSpace(request.Password) &&
+                           !string.IsNullOrWhiteSpace(request.Url);
+
+                case GitRepositoryRequest.RequestType.Clone:
+                    return !string.IsNullOrWhiteSpace(request.BaseDirectory) &&
+                           !string.IsNullOrWhiteSpace(request.RepositoryName) &&
+                            Directory.Exists(request.BaseDirectory) &&
+                           !string.IsNullOrWhiteSpace(request.User) &&
+                           !string.IsNullOrWhiteSpace(request.Password) &&
+                           !string.IsNullOrWhiteSpace(request.Url);
+                default:
+                    throw new Exception("Unhandled IGitProxy request type");
+            }
+        }
+
+        // Open Remote: Url must be verified
+        private Task<GitRepositoryRemote> OpenRemoteImpl(string user, string password, string repositoryName)
+        {
+            return GetRepositoryRemoteGithub(user, password, repositoryName);
+        }
+
+        // Open History: Local | Remote, nulls permitted
+        private Task OpenHistoryImpl(string user,
+                                     string password,
+                                     GitRepositoryLocal local,
+                                     GitRepositoryRemote remote,
+                                     Action<GitCommitHistory, GitCommitHistory> callback)
+        {
+            return Task.Run(async () =>
+            {
+                using (var gitRepo = new LibGit2Sharp.Repository(local.GitPath))
+                {
                     // Remote
                     var remoteName = gitRepo.Head.RemoteName;
 
@@ -124,7 +320,7 @@ namespace SimpleGit.Component
                     //       -> Yes (take commits after common ancestor)
                     //       -> No  (Error)
                     if (!gitRepo.Commits.Any(x => x.Id.Sha == remote.GetHead().LastCommit.Sha))
-                        throw new Exception("No common ancestor between local and remote repositories:  " + request.RepositoryName);
+                        throw new Exception("No common ancestor between local and remote repositories:  " + local.Name);
 
                     // Common Ancestor
                     var commonAncestor = gitRepo.Commits.First(x => x.Id.Sha == remote.GetHead().LastCommit.Sha);
@@ -133,14 +329,14 @@ namespace SimpleGit.Component
                     var commitRemote = remote.GetHead().LastCommit;
 
                     // Commit History (remote)
-                    var commitRemoteHistory = await GetRepositoryRemoteHistory(request.User,
-                                                                               request.Password,
-                                                                               request.RepositoryId,
-                                                                               gitRepo.Head.RemoteName,
-                                                                               commonAncestor.Sha,
-                                                                               commonAncestorSha);
+                    var remoteHistory = await GetRepositoryRemoteHistoryGithub(user,
+                                                                         password,
+                                                                         local.Name,
+                                                                         remoteName,
+                                                                         commonAncestor.Sha,
+                                                                         commonAncestorSha);
                     // Commit Hisotry (local)
-                    var commitLocalHistory = new GitCommitHistory()
+                    var localHistory = new GitCommitHistory()
                     {
                         BranchName = gitRepo.Head.CanonicalName,
                         ShaOlder = commonAncestorSha,
@@ -148,7 +344,7 @@ namespace SimpleGit.Component
                     };
 
                     // HEAD -> Tip
-                    commitLocalHistory.Commits.Add(new GitCommit()
+                    localHistory.Commits.Add(new GitCommit()
                     {
                         Author = commitLocal.Author.Name,
                         Message = commitLocal.Message,
@@ -169,7 +365,7 @@ namespace SimpleGit.Component
                             // -> Parent (up the tree)
                             commitLocal = commitLocal.Parents.First();
 
-                            commitLocalHistory.Commits.Add(new GitCommit()
+                            localHistory.Commits.Add(new GitCommit()
                             {
                                 Author = commitLocal.Author.Name,
                                 Message = commitLocal.Message,
@@ -179,21 +375,91 @@ namespace SimpleGit.Component
                         }
                     }
 
-                    // Branch Status
-                    var branchStatus = new GitBranchStatus()
-                    {
-                        CommitDelta = commitLocalHistory.Commits.Count - commitRemoteHistory.Commits.Count,
-                        IsAhead = commitLocalHistory.Commits.Count > 0,
-                        IsBehind = commitRemoteHistory.Commits.Count > 0
-                    };
-
-                    result.Local = local;
-                    result.Remote = remote;
-                    result.Status = branchStatus;
+                    // Callback from Task operation to caller
+                    callback(localHistory, remoteHistory);
                 }
-
-                return result;
             });
+        }
+
+        private Task<GitRepositoryRemote> GetRepositoryRemoteGithub(string user, string password, string repositoryName)
+        {
+            using (var githubProxy = new GithubProxy())
+            {
+                return githubProxy.GetGithubRepository(user, password, repositoryName);
+            }
+        }
+
+        private Task<GitCommitHistory> GetRepositoryRemoteHistoryGithub(string user, string password, string repositoryName, string branchName, string sha1, string sha2)
+        {
+            using (var githubProxy = new GithubProxy())
+            {
+                return githubProxy.GetGithubCommitHistory(user, password, repositoryName, branchName, sha1, sha2);
+            }
+        }
+
+        private GitResponseData OpenImpl(GitRepositoryLocal? local,
+                                         GitRepositoryRemote? remote,
+                                         GitCommitHistory? localHistory,
+                                         GitCommitHistory? remoteHistory)
+        {
+            // Branch Status
+            GitBranchStatus? branchStatus = null;
+
+            if (localHistory != null &&
+                remoteHistory != null)
+            {
+                // Branch Status
+                branchStatus = new GitBranchStatus()
+                {
+                    CommitDelta = localHistory.Commits.Count - remoteHistory.Commits.Count,
+                    IsAhead = localHistory.Commits.Count > 0,
+                    IsBehind = remoteHistory.Commits.Count > 0
+                };
+            }
+
+            return new GitResponseData()
+            {
+                Local = local,
+                Remote = remote,
+                Status = branchStatus
+            };
+        }
+
+        // Open Local: Git path must be verified
+        private GitRepositoryLocal OpenLocalImpl(string gitPath)
+        {
+            if (string.IsNullOrWhiteSpace(gitPath))
+                throw new ArgumentException("Invalid Git path (local)");
+
+            if (!Directory.Exists(gitPath))
+                throw new ArgumentException("Invalid Git path (local)");
+
+            using (var gitRepo = new LibGit2Sharp.Repository(gitPath))
+            {
+                var repositoryName = Directory.GetParent(gitPath).Name;
+
+                var local = new GitRepositoryLocal(repositoryName);
+
+                local.GitPath = gitPath;
+                local.Remotes = gitRepo.Network.Remotes.Select(x => new GitRemote(x.Name, x.Url)).ToList();
+                local.Size = 0;
+                local.WorkingDirectory = gitRepo.Info.WorkingDirectory;
+                local.Branches = gitRepo.Branches.Select(x => new GitBranch()
+                {
+                    IsHead = x.IsCurrentRepositoryHead,
+                    LastCommit = new GitCommit()
+                    {
+                        Message = x.Tip.Message,
+                        Sha = x.Tip.Sha,
+                        Timestamp = x.Tip.Author.When,
+                        Author = x.Tip.Author.Name
+                    },
+                    Name = x.CanonicalName,
+                    RemoteName = x.RemoteName
+                }).ToList();
+
+                return local;
+            }
         }
 
         /// <summary>
@@ -241,26 +507,12 @@ namespace SimpleGit.Component
             }
         }
 
-        private Task<GitRepositoryRemote> GetRepositoryRemote(string user, string password, long repositoryId)
+        private string CreateGitPath(string baseDirectory, string workingDirectory)
         {
-            using (var githubProxy = new GithubProxy())
-            {
-                return githubProxy.GetGithubRepository(user, password, repositoryId);
-            }
+            return Path.Combine(baseDirectory, workingDirectory, ".git");
         }
 
-        private Task<GitCommitHistory> GetRepositoryRemoteHistory(string user, string password, long repositoryId, string branchName, string sha1, string sha2)
-        {
-            using (var githubProxy = new GithubProxy())
-            {
-                return githubProxy.GetGithubCommitHistory(user, password, repositoryId, branchName, sha1, sha2);
-            }
-        }
-
-        private string CreateGitPath(GitRepositoryRequest request)
-        {
-            return Path.Combine(request.BaseDirectory, request.RepositoryName, ".git");
-        }
+        #endregion
 
         public void Dispose()
         {

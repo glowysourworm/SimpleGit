@@ -6,7 +6,7 @@
     /// </summary>
     public class GitRepositoryRemote : GitRepository
     {
-        public GitRepositoryRemote(long id, string name) : base(id, name)
+        public GitRepositoryRemote(string name) : base(name)
         {
             this.Url = string.Empty;
             this.Parents = new List<GitRemote>();

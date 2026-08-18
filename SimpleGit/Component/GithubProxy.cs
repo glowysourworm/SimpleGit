@@ -60,14 +60,14 @@ namespace SimpleGit.Component
             });
         }
 
-        public Task<GitCommitHistory> GetGithubCommitHistory(string user, string password, long repositoryId, string branchName, string sha1, string sha2)
+        public Task<GitCommitHistory> GetGithubCommitHistory(string user, string password, string repositoryName, string branchName, string sha1, string sha2)
         {
             return Task.Run(async () =>
             {
                 var client = CreateClient();
 
                 // Commits From...
-                var commits = await client.Repository.Commit.GetAll(repositoryId, new CommitRequest()
+                var commits = await client.Repository.Commit.GetAll(user, repositoryName, new CommitRequest()
                 {
                     Sha = sha1    // ONLY FOR THE COMMIT'S BRANCH! (via the SHA)
                 });
@@ -108,7 +108,7 @@ namespace SimpleGit.Component
                 // Query for last commit (tip)
                 var lastCommit = await client.Repository.Commit.Get(repository.Id, head.Commit.Ref);
 
-                return new GitRepositoryRemote(repository.Id, repository.Name)
+                return new GitRepositoryRemote(repository.Name)
                 {
                     Branches = branches.Select(x => new GitBranch()
                     {
@@ -124,7 +124,7 @@ namespace SimpleGit.Component
                     }).ToList(),
                     IsFork = repository.Fork,
                     OwnerName = repository.Owner.Name,
-                    Parents = new List<GitRemote>() { new GitRemote(repository.Parent.Id, repository.Parent.Name, repository.Parent.Url) },
+                    Parents = new List<GitRemote>() { new GitRemote(repository.Parent.Name, repository.Parent.Url) },
                     Size = repository.Size,
                     Url = repository.Url
                 };

@@ -6,7 +6,7 @@
     /// repository (local only). The rest of the information must be inferred from the repository
     /// metadata.
     /// </summary>
-    public class GitRepositoryResponse
+    public class GitResponseData
     {
         /// <summary>
         /// Available only if the repository has been cloned locally; or only exists locally.
@@ -23,5 +23,31 @@
         /// let you know if the repository is up to date. The status references local v.s. remote.
         /// </summary>
         public GitBranchStatus? Status { get; set; }
+    }
+
+
+    public class GitRepositoryResponse
+    {
+        /// <summary>
+        /// Indicates that this is a multiple repository response
+        /// </summary>
+        public bool IsMultipleResponse { get; set; }
+
+        /// <summary>
+        /// Response data for multiple repositories
+        /// </summary>
+        public List<GitResponseData> MultipleResponseData { get; set; }
+
+        /// <summary>
+        /// Response data for single repository request
+        /// </summary>
+        public GitResponseData? SingleResponseData { get; set; }
+
+        public GitRepositoryResponse()
+        {
+            this.IsMultipleResponse = false;
+            this.MultipleResponseData = new List<GitResponseData>();
+            this.SingleResponseData = null;
+        }
     }
 }

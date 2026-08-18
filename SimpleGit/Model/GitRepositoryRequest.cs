@@ -11,34 +11,38 @@
             /// <summary>
             /// The service will open local repositories to get metadata. This will be read-only.
             /// </summary>
-            LocalRead,
+            LocalReadSingle = 0,
 
             /// <summary>
-            /// The service will open local repositories to get metadata; remote (github) repositories
-            /// to get data; and create responses to detail each repository's status.
+            /// The service will open local repositories to get metadata. This will be read-only.
             /// </summary>
-            LoadAndRemoteRead,
+            LocalReadAll = 1,
+
+            /// <summary>
+            /// The service will load repositoires from your github account
+            /// </summary>
+            GithubReadSingle = 2,
+
+            /// <summary>
+            /// The service will load repositoires from your github account
+            /// </summary>
+            GithubReadAll = 3,
 
             /// <summary>
             /// Perform a fetch from the HEAD remote
             /// </summary>
-            Fetch,
+            Fetch = 4,
 
             /// <summary>
             /// Clone a git repository locally, into the base directory (working directory will be created on clone)
             /// </summary>
-            Clone
+            Clone = 5
         }
 
         /// <summary>
         /// Type of git request
         /// </summary>
         public RequestType Type { get; set; }
-
-        /// <summary>
-        /// Id of repository to fetch or clone
-        /// </summary>
-        public long RepositoryId { get; set; }
 
         /// <summary>
         /// User (basic authentication)
@@ -70,5 +74,10 @@
         /// Directory just above working directory. This will be where clones are put after completing the git request.
         /// </summary>
         public string BaseDirectory { get; set; }
+
+        /// <summary>
+        /// Handler for logging during repository request operations
+        /// </summary>
+        public GitHandlers.GitLogHandler LogHandler { get; set; }
     }
 }
