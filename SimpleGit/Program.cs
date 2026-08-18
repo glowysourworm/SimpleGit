@@ -1,7 +1,5 @@
 ﻿using System.Diagnostics;
 
-using SimpleWpf.Extensions;
-
 namespace SimpleGit
 {
     public class Program
@@ -71,38 +69,6 @@ namespace SimpleGit
             }
         }
 
-        /// <summary>
-        /// Returns paths to all git repositories in base directory - recursing only at the top level.
-        /// </summary>
-        static IEnumerable<GitRepository> GetRepositories(string baseDirectory)
-        {
-            // Libgit2Sharp:  This project (at the time SimpleGit was built) was very new. So, the
-            //                use of their proxy, and unmanaged libraries, wasn't showing all the 
-            //                problems as simple log callbacks. 
-            //
-            //                That's a little too frustrating when trying to manage a git repo. So,
-            //                our use here is for local directories to gather information. Then, we'll
-            //                call git.exe on the command line.
-            //
-
-            var result = new List<GitRepository>();
-
-            foreach (var directory in Directory.GetDirectories(baseDirectory))
-            {
-                var gitPath = Path.Combine(directory, ".git");
-
-                // Check for .git folder
-                if (Directory.Exists(gitPath))
-                {
-                    var repository = GitRepository.Load(gitPath);
-
-                    result.Add(repository);
-                }
-            }
-
-            return result;
-        }
-
         static void PrintHelp()
         {
             Output("Welcome to SimpleGit! This application operates on your base git folder to manage multiple git repositories.");
@@ -165,40 +131,45 @@ namespace SimpleGit
 
         static void List(string directory)
         {
-            Output("Simple Git:  -list " + directory);
-            Output("");
+            //Output("Simple Git:  -list " + directory);
+            //Output("");
 
-            var repositories = GetRepositories(directory);
+            //using (var proxy = new GitProxy())
+            //{
+            //    var repositories = proxy.OpenMany(directory).Result;
 
-            foreach (var repository in repositories)
-            {
-                var output = string.Format("{0}\t{1}\t{2}", repository.Name.ForceLengthLeft(30, false), repository.GitPath.ForceLengthRight(50, true), repository.LastCommitLocal.ToString("yyyy-mm-dd hh:mm:ss tt"));
+            //    foreach (var repository in repositories)
+            //    {
+            //        var output = string.Format("{0}\t{1}\t{2}", repository.Name.ForceLengthLeft(30, false), repository.GitPath.ForceLengthRight(50, true), repository.LastCommitLocal.ToString("yyyy-mm-dd hh:mm:ss tt"));
 
-                Output(output);
-            }
+            //        Output(output);
+            //    }
 
-            Output("");
-            Output("Total Repository Count:  " + repositories.Count());
-            Output("");
+            //    Output("");
+            //    Output("Total Repository Count:  " + repositories.Count());
+            //    Output("");
+            //}
         }
 
         static void Fetch(string workingDirectory)
         {
-            var repositories = GetRepositories(workingDirectory);
+            //using (var proxy = new GitProxy())
+            //{
+            //    var repositories = proxy.OpenMany(workingDirectory).Result;
 
-            foreach (var repository in repositories)
-            {
-                try
-                {
-                    // -> Git Repo Directory, git.exe, fetch
-                    Call(Path.Combine(workingDirectory, repository.Name), GIT, "fetch -v");
-                }
-                catch (Exception ex)
-                {
-                    Output("Error calling git.exe:  " + ex.Message, true, ConsoleColor.Red);
-                }
-            }
-
+            //    foreach (var repository in repositories)
+            //    {
+            //        try
+            //        {
+            //            // -> Git Repo Directory, git.exe, fetch
+            //            Call(Path.Combine(workingDirectory, repository.Name), GIT, "fetch -v");
+            //        }
+            //        catch (Exception ex)
+            //        {
+            //            Output("Error calling git.exe:  " + ex.Message, true, ConsoleColor.Red);
+            //        }
+            //    }
+            //}
         }
 
         static void Main(string[] args)
