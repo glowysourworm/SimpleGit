@@ -17,8 +17,8 @@ namespace SimpleGit.Interface
         /// </summary>
         /// <param name="user">Your Github account username</param>
         /// <param name="password">Your Github account password</param>
-        /// <param name="repositoryId">Repository Id</param>
-        Task<GitRepositoryRemote?> GetGithubRepository(string user, string password, string repositoryName);
+        /// <param name="repositoryName">Repository Name</param>
+        Task<GitRepositoryRemote> GetGithubRepository(string user, string password, string repositoryName);
 
         /// <summary>
         /// Returns all repositories' metadata for the specified user

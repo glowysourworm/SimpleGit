@@ -9,7 +9,6 @@
         public GitRepositoryRemote(string name) : base(name)
         {
             this.Url = string.Empty;
-            this.Parents = new List<GitRemote>();
         }
 
         /// <summary>
@@ -26,10 +25,5 @@
         /// Is remote repository fork of another repository?
         /// </summary>
         public bool IsFork { get; set; }
-
-        /// <summary>
-        /// List of all parent remotes for the repository
-        /// </summary>
-        public List<GitRemote> Parents { get; set; }
     }
 }

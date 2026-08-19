@@ -44,6 +44,9 @@ namespace SimpleGit.Component
                     case GitRepositoryRequest.RequestType.GithubReadAll:
                         multiple = await OpenGithub(request);
                         break;
+                    case GitRepositoryRequest.RequestType.Initialize:           // Proxy will infer the proper single type
+                        multiple = await OpenDirectory(request);
+                        break;
                     default:
                         throw new Exception("Unhandled IGitProxy request type");
                 }
@@ -82,7 +85,9 @@ namespace SimpleGit.Component
                             {
                                 BaseDirectory = request.BaseDirectory,
                                 Password = request.Password,
-                                Type = GitRepositoryRequest.RequestType.LocalReadSingle,
+                                Type = request.Type == GitRepositoryRequest.RequestType.Initialize ?
+                                                              GitRepositoryRequest.RequestType.Initialize
+                                                            : GitRepositoryRequest.RequestType.LocalReadSingle,
                                 Url = request.Url,
                                 User = request.User,
                                 WorkingDirectory = directory,
@@ -144,7 +149,6 @@ namespace SimpleGit.Component
 
                 bool localRead = false;
                 bool remoteRead = false;
-                bool remoteIsGithub = false;
 
                 string? gitPath = null;
                 GitRepositoryLocal? local = null;
@@ -162,15 +166,14 @@ namespace SimpleGit.Component
                     case GitRepositoryRequest.RequestType.GithubReadSingle:
                     {
                         remoteRead = true;
-                        remoteIsGithub = true;
                     }
                     break;
                     case GitRepositoryRequest.RequestType.Fetch:
                     case GitRepositoryRequest.RequestType.Clone:
+                    case GitRepositoryRequest.RequestType.Initialize:
                     {
                         localRead = true;
                         remoteRead = true;
-                        remoteIsGithub = request.Url.Contains("github.com");        // Kludgey (TODO)
                     }
                     break;
                     default:
@@ -217,17 +220,12 @@ namespace SimpleGit.Component
 
                 if (remoteRead)
                 {
-                    if (remoteIsGithub)
-                        remote = await OpenRemoteImpl(request.User, request.Password, request.RepositoryName);
-
-                    else
-                        throw new Exception("Remote Only mode is not supported for other services. Please use Github for remote-only.");
+                    remote = await OpenRemoteImpl(request.User, request.Password, request.RepositoryName);
                 }
 
                 // History
                 if (local != null &&
-                    remote != null &&
-                    remoteIsGithub)
+                    remote != null)
                 {
                     await OpenHistoryImpl(request.User, request.Password, local, remote, (localHis, remoteHis) =>
                     {
@@ -268,6 +266,12 @@ namespace SimpleGit.Component
                            !string.IsNullOrWhiteSpace(request.Password) &&
                            !string.IsNullOrWhiteSpace(request.Url);
 
+                case GitRepositoryRequest.RequestType.Initialize:
+                    return !string.IsNullOrWhiteSpace(request.BaseDirectory) &&
+                            Directory.Exists(request.BaseDirectory) &&
+                           !string.IsNullOrWhiteSpace(request.User) &&
+                           !string.IsNullOrWhiteSpace(request.Password);
+
                 case GitRepositoryRequest.RequestType.GithubReadAll:
                     return !string.IsNullOrWhiteSpace(request.BaseDirectory) &&
                             Directory.Exists(request.BaseDirectory) &&
@@ -299,7 +303,13 @@ namespace SimpleGit.Component
         // Open Remote: Url must be verified
         private Task<GitRepositoryRemote> OpenRemoteImpl(string user, string password, string repositoryName)
         {
-            return GetRepositoryRemoteGithub(user, password, repositoryName);
+            // Try Github First
+            var result = GetRepositoryRemoteGithub(user, password, repositoryName);
+
+            if (result == null)
+                throw new Exception("Initialization of repository failed:  no way to fetch upstream unless there is auto-cloning, or it is on github");
+
+            return result;
         }
 
         // Open History: Local | Remote, nulls permitted
@@ -319,11 +329,15 @@ namespace SimpleGit.Component
                     // Local -> Common Ancestor with Remote?
                     //       -> Yes (take commits after common ancestor)
                     //       -> No  (Error)
-                    if (!gitRepo.Commits.Any(x => x.Id.Sha == remote.GetHead().LastCommit.Sha))
+                    if (!gitRepo.Branches.Any(branch => branch.Commits.Any(x => x.Id.Sha == remote.GetHead().LastCommit.Sha)))
                         throw new Exception("No common ancestor between local and remote repositories:  " + local.Name);
 
                     // Common Ancestor
-                    var commonAncestor = gitRepo.Commits.First(x => x.Id.Sha == remote.GetHead().LastCommit.Sha);
+                    var commonAncestor = gitRepo.Branches
+                                                .First(branch => branch.Commits.Any(x => x.Id.Sha == remote.GetHead().LastCommit.Sha))
+                                                .Commits
+                                                .First(x => x.Sha == remote.GetHead().LastCommit.Sha);
+
                     var commonAncestorSha = commonAncestor.Sha;
                     var commitLocal = gitRepo.Head.Tip;
                     var commitRemote = remote.GetHead().LastCommit;
@@ -381,7 +395,7 @@ namespace SimpleGit.Component
             });
         }
 
-        private Task<GitRepositoryRemote> GetRepositoryRemoteGithub(string user, string password, string repositoryName)
+        private Task<GitRepositoryRemote?> GetRepositoryRemoteGithub(string user, string password, string repositoryName)
         {
             using (var githubProxy = new GithubProxy())
             {

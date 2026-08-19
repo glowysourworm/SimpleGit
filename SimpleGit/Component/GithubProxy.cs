@@ -42,21 +42,13 @@ namespace SimpleGit.Component
             });
         }
 
-        public Task<GitRepositoryRemote?> GetGithubRepository(string user, string password, string repositoryName)
+        public Task<GitRepositoryRemote> GetGithubRepository(string user, string password, string repositoryName)
         {
             return Task.Run(async () =>
             {
                 var client = CreateClient();
 
-                var repositories = await client.Repository.GetAllForUser(user);
-
-                foreach (var repository in repositories)
-                {
-                    if (repository.Name == repositoryName)
-                        return (await Map(repository, client));
-                }
-
-                return null;
+                return await Map(await client.Repository.Get(user, repositoryName), client);
             });
         }
 
@@ -105,26 +97,38 @@ namespace SimpleGit.Component
                 // Query for HEAD branch
                 var head = await client.Repository.Branch.Get(repository.Id, repository.DefaultBranch);
 
-                // Query for last commit (tip)
-                var lastCommit = await client.Repository.Commit.Get(repository.Id, head.Commit.Ref);
+                // Query for last commits for each branch
+                var gitBranches = branches.Select(async branch =>
+                {
+                    //var commit = await client.Repository.Commit.Get(repository.Id, branch.Commit.Sha);
+                    //var commits = await client.Repository.Commit.GetAll(repository.Id);
+                    var commit = await client.Repository.Commit.Get(repository.Id, branch.Commit.Sha);
+
+                    return new GitBranch()
+                    {
+                        IsHead = branch.Name == repository.DefaultBranch,
+                        LastCommit = new GitCommit()
+                        {
+                            Author = commit.Commit.Author.Name,
+                            Message = commit.Commit.Message,
+                            Sha = commit.Sha,
+                            Timestamp = commit.Commit.Author.Date
+                        },
+                        Name = branch.Name
+                    };
+                });
+
+                // Not sure why it made those tasks
+                var gitBranchesResolved = new List<GitBranch>();
+
+                foreach (var branch in gitBranches)
+                    gitBranchesResolved.Add(await branch);
 
                 return new GitRepositoryRemote(repository.Name)
                 {
-                    Branches = branches.Select(x => new GitBranch()
-                    {
-                        IsHead = x.Name == repository.DefaultBranch,
-                        LastCommit = new GitCommit()
-                        {
-                            Author = x.Commit.User.Name,
-                            Message = lastCommit.Commit.Message,
-                            Sha = x.Commit.Sha,
-                            Timestamp = repository.PushedAt ?? DateTime.MinValue             // THIS SHOULD BE PER BRANCH (???)
-                        },
-                        Name = x.Name
-                    }).ToList(),
+                    Branches = gitBranchesResolved,
                     IsFork = repository.Fork,
                     OwnerName = repository.Owner.Name,
-                    Parents = new List<GitRemote>() { new GitRemote(repository.Parent.Name, repository.Parent.Url) },
                     Size = repository.Size,
                     Url = repository.Url
                 };

@@ -29,14 +29,20 @@
             GithubReadAll = 3,
 
             /// <summary>
+            /// Reads local and remote data for multiple repositories. This will require that you specify 
+            /// your base directory, and github credentials.
+            /// </summary>
+            Initialize = 4,
+
+            /// <summary>
             /// Perform a fetch from the HEAD remote
             /// </summary>
-            Fetch = 4,
+            Fetch = 5,
 
             /// <summary>
             /// Clone a git repository locally, into the base directory (working directory will be created on clone)
             /// </summary>
-            Clone = 5
+            Clone = 6
         }
 
         /// <summary>
